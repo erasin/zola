@@ -186,12 +186,21 @@ pub fn markdown_to_html(content: &str, context: &RenderContext) -> Result<Render
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
 
+    let mut bob_has = false;
+    let mut bob_buffer = String::new();
+
     {
         let mut events = Parser::new_ext(content, opts)
             .map(|event| {
                 match event {
                     Event::Text(text) => {
                         // if we are in the middle of a code block
+
+                        if bob_has {
+                            bob_buffer.push_str(&text);
+                            return Event::Text("".into());
+                        }
+
                         if let Some((ref mut highlighter, in_extra)) = highlighter {
                             let highlighted = if in_extra {
                                 if let Some(ref extra) = context.config.extra_syntax_set {
@@ -213,8 +222,22 @@ pub fn markdown_to_html(content: &str, context: &RenderContext) -> Result<Render
                         Event::Text(text)
                     }
                     Event::Start(Tag::CodeBlock(ref kind)) => {
+                        let tag = match kind {
+                            CodeBlockKind::Indented => "unknow",
+                            CodeBlockKind::Fenced(info) => info,
+                        };
+
+                        if tag == "bob" {
+                            bob_has = true;
+                            return Event::Text("".into());
+                        }
+
+                        if tag == "mermaid" {
+                            return Event::Html("<pre><code class='language-mermaid'>".into());
+                        }
+
                         if !context.config.highlight_code {
-                            return Event::Html("<pre><code>".into());
+                            return Event::Html(format!("<pre><code 'langulage-{}'>", tag).into());
                         }
 
                         let theme = &THEME_SET.themes[&context.config.highlight_theme];
@@ -233,7 +256,24 @@ pub fn markdown_to_html(content: &str, context: &RenderContext) -> Result<Render
                         let snippet = start_highlighted_html_snippet(theme);
                         Event::Html(snippet.0.into())
                     }
-                    Event::End(Tag::CodeBlock(_)) => {
+                    Event::End(Tag::CodeBlock(ref kind)) => {
+                        let tag = match kind {
+                            CodeBlockKind::Indented => "unknow",
+                            CodeBlockKind::Fenced(info) => info,
+                        };
+
+                        // bob
+                        if tag == "bob" && bob_has {
+                            bob_has = false;
+                            let bsvg = svgbob::to_svg(&bob_buffer.to_string()).to_string();
+                            bob_buffer.clear();
+                            return Event::Html(bsvg.into());
+                        }
+
+                        if tag == "mermaid" {
+                            return Event::Html("</code></pre>\n".into());
+                        }
+
                         if !context.config.highlight_code {
                             return Event::Html("</code></pre>\n".into());
                         }
